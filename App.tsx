@@ -27,6 +27,7 @@ import { CloudIcon } from './components/icons/CloudIcon';
 import { auth, isFirebaseConfigured } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { startNFCScan, isNFCSupported, writeNFCSOSTag } from './services/nfcService';
+import { Analytics } from '@vercel/analytics/react';
 
 // Dữ liệu mẫu tĩnh (Static Data) - Chỉ dùng để hiển thị khi người dùng chưa nhập gì
 const initialReports: EnvironmentalReport[] = [
@@ -1189,6 +1190,9 @@ const App: React.FC = () => {
         onSubmit={handleChatSubmit}
         onClearChat={handleClearChat}
       />
+
+      {/* Vercel Web Analytics */}
+      <Analytics />
     </div>
   );
 };
