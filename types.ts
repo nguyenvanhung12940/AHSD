@@ -25,6 +25,7 @@ export interface EnvironmentalReport {
   status: ReportStatus;
   timestamp: Date;
   area?: string;
+  reporter?: string;
 }
 
 export interface GroundingChunk {

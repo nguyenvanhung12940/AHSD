@@ -31,8 +31,12 @@ CREATE TABLE IF NOT EXISTS reports (
   status TEXT, -- 'Báo cáo mới', 'Đang xử lý', 'Đã xử lý'
   timestamp TIMESTAMPTZ DEFAULT NOW(),
   area TEXT,
+  reporter TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure reporter column exists if table was already created
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reporter TEXT;
 
 -- 3. Notifications Table
 CREATE TABLE IF NOT EXISTS notifications (

@@ -62,12 +62,17 @@ export const initDb = () => {
       status TEXT,
       timestamp TEXT,
       area TEXT,
+      reporter TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   try {
     db.exec("ALTER TABLE reports ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE reports ADD COLUMN reporter TEXT");
   } catch (e) {}
 
   // Notifications table
@@ -97,6 +102,15 @@ export const initDb = () => {
       status TEXT DEFAULT 'pending',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(userId) REFERENCES users(id)
+    )
+  `);
+
+  // Notes table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 

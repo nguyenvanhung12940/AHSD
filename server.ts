@@ -8,6 +8,7 @@ import bcrypt from 'bcryptjs';
 import db, { initDb } from './database';
 import { EnvironmentalReport } from './types';
 import { supabase } from './services/supabaseClient';
+import * as dbService from './src/db/dbService.ts';
 
 import dns from 'dns';
 import { promisify } from 'util';
@@ -110,10 +111,10 @@ async function startServer() {
       console.log(`[CONFIG] Supabase Key: ${process.env.VITE_SUPABASE_ANON_KEY ? 'Present' : 'Missing'}`);
       
       if (!url.startsWith('https://')) {
-        console.warn('CRITICAL: Supabase URL MUST start with https://');
+        console.warn('[Supabase Configuration] Supabase URL should start with https://');
       }
       if (!url.includes('.supabase.co')) {
-        console.warn('CRITICAL: Supabase URL MUST end with .supabase.co');
+        console.warn('[Supabase Configuration] Supabase URL should end with .supabase.co');
       }
       if (url.includes('fpgvshoxoxnebouesuct')) {
         console.log('[CONFIG] Using project fpgvshoxoxnebouesuct.');
@@ -126,7 +127,7 @@ async function startServer() {
         console.log(`Supabase DNS check result: ${isValid}`);
         fs.appendFileSync('server-log.txt', `[${new Date().toISOString()}] Supabase DNS check result: ${isValid}\n`);
         if (!isValid) {
-          console.warn(`CRITICAL: Supabase DNS lookup failed for ${url}. Backing off for 1 min.`);
+          console.warn(`[Supabase Connection Info] Supabase DNS lookup failed for ${url}. Running in local SQLite mode as fallback (backing off for 1 min).`);
           supabaseBackoffUntil = Date.now() + SUPABASE_BACKOFF_DURATION;
         } else {
           console.log('Supabase DNS lookup successful.');
@@ -180,8 +181,17 @@ async function startServer() {
 
       let authorities: any[] = [];
 
-      // Try Supabase first
-      if (shouldTrySupabase()) {
+      // Try Cloud SQL first
+      if (process.env.SQL_HOST) {
+        try {
+          authorities = await dbService.getAuthorities(area);
+        } catch (err) {
+          console.error("Cloud SQL failed to get authorities:", err);
+        }
+      }
+
+      // Try Supabase second
+      if (authorities.length === 0 && shouldTrySupabase()) {
         try {
           const { data, error } = await supabase
             .from('users')
@@ -211,6 +221,20 @@ async function startServer() {
       const message = `Báo cáo mới: ${issueType} tại ${area}. Mức độ ưu tiên: ${reportPriority}.`;
 
       authorities.forEach(async (auth) => {
+        // Save to Cloud SQL
+        if (process.env.SQL_HOST) {
+          try {
+            await dbService.createNotification({
+              userId: auth.id,
+              reportId,
+              message,
+              type: 'new_report'
+            });
+          } catch (err) {
+            console.error("Cloud SQL failed to create notification:", err);
+          }
+        }
+
         // Save to Supabase if possible
         if (shouldTrySupabase()) {
           try {
@@ -326,8 +350,20 @@ async function startServer() {
       
       let user: any = null;
 
-      // Try Supabase first
-      if (shouldTrySupabase()) {
+      // Try Cloud SQL first
+      if (process.env.SQL_HOST) {
+        try {
+          user = await dbService.getUserByUsername(username);
+          if (user) {
+            user.organizationName = user.organizationName || (user as any).organization_name;
+          }
+        } catch (err) {
+          console.error("Cloud SQL login query failed:", err);
+        }
+      }
+
+      // Try Supabase second
+      if (!user && shouldTrySupabase()) {
         try {
           const { data, error } = await supabase
             .from('users')
@@ -389,7 +425,28 @@ async function startServer() {
 
       const hashedPassword = bcrypt.hashSync(password, 10);
 
-      // Try Supabase first
+      // Try Cloud SQL first
+      if (process.env.SQL_HOST) {
+        try {
+          const existingUser = await dbService.getUserByUsername(username);
+          if (existingUser) {
+            return res.status(400).json({ message: 'Tên đăng nhập đã tồn tại (Cloud SQL)' });
+          }
+          await dbService.createUser({
+            username,
+            password: hashedPassword,
+            role,
+            area,
+            organizationName,
+            status: 'active'
+          });
+          return res.status(201).json({ message: 'Đăng ký tài khoản thành công (Cloud SQL). Bạn có thể đăng nhập ngay.' });
+        } catch (err) {
+          console.error("Cloud SQL registration failed:", err);
+        }
+      }
+
+      // Try Supabase second
       if (shouldTrySupabase()) {
         try {
           // Check if user exists in Supabase
@@ -459,10 +516,21 @@ let supabaseTableErrorLogged = false;
         return res.status(400).json({ message: 'Thiếu thông tin Firebase' });
       }
 
-      // Try to find user in Supabase or SQLite
+      // Try to find user in Cloud SQL, Supabase or SQLite
       let user: any = null;
 
-      if (shouldTrySupabase()) {
+      if (process.env.SQL_HOST) {
+        try {
+          user = await dbService.getUserByUsername(email);
+          if (user) {
+            user.organizationName = user.organizationName || (user as any).organization_name;
+          }
+        } catch (err) {
+          console.error("Cloud SQL firebase login fetch failed:", err);
+        }
+      }
+
+      if (!user && shouldTrySupabase()) {
         try {
           const { data, error } = await supabase.from('users').select('*').eq('username', email).single();
           if (error && !(error.code === 'PGRST116' || error.code === '42P01' || error.message?.includes('Could not find the table'))) {
@@ -486,7 +554,26 @@ let supabaseTableErrorLogged = false;
         const defaultArea = 'All';
         const defaultOrg = displayName || 'Người dùng';
         
-        if (shouldTrySupabase()) {
+        if (process.env.SQL_HOST) {
+          try {
+            user = await dbService.createUser({
+              username: email,
+              password: 'firebase-auth-no-password',
+              role: defaultRole,
+              area: defaultArea,
+              organizationName: defaultOrg,
+              status: 'active',
+              uid: uid
+            });
+            if (user) {
+              user.organizationName = user.organizationName || (user as any).organization_name;
+            }
+          } catch (err) {
+            console.error("Cloud SQL firebase user creation failed:", err);
+          }
+        }
+
+        if (!user && shouldTrySupabase()) {
           try {
             const { data, error } = await supabase.from('users').insert([{
               username: email,
@@ -551,7 +638,30 @@ let supabaseTableErrorLogged = false;
 
         const hashedPassword = bcrypt.hashSync(password, 10);
 
-        // Try Supabase first
+        // Try Cloud SQL first
+        if (process.env.SQL_HOST) {
+          try {
+            const existingUser = await dbService.getUserByUsername(username);
+            if (!existingUser) {
+              await dbService.createUser({
+                username,
+                password: hashedPassword,
+                role,
+                area,
+                organizationName,
+                status: 'active'
+              });
+              results.success++;
+            } else {
+              results.failed++;
+            }
+            continue;
+          } catch (err) {
+            console.error("Cloud SQL bulk register user failed:", err);
+          }
+        }
+
+        // Try Supabase second
         if (shouldTrySupabase()) {
           try {
             const { data: existingUser, error: checkError } = await supabase.from('users').select('username').eq('username', username).single();
@@ -611,6 +721,31 @@ let supabaseTableErrorLogged = false;
   app.get('/api/reports', async (req, res) => {
     console.log(`[${new Date().toISOString()}] GET /api/reports - Request received`);
     try {
+      // Try Cloud SQL first
+      if (process.env.SQL_HOST) {
+        try {
+          const reports = await dbService.getReports();
+          const parsedReports = reports.map((r: any) => ({
+            ...r,
+            mediaUrl: r.mediaUrl,
+            mediaType: r.mediaType,
+            userDescription: r.userDescription,
+            isIssuePresent: !!r.isIssuePresent,
+            reporter: r.reporter,
+            aiAnalysis: {
+              issueType: r.issueType,
+              description: r.description,
+              priority: r.priority,
+              solution: r.solution,
+              isIssuePresent: !!r.isIssuePresent
+            }
+          }));
+          return res.json(parsedReports);
+        } catch (err) {
+          console.error("Cloud SQL fetch reports failed, falling back:", err);
+        }
+      }
+
       // Try Supabase first if configured and not in backoff
       if (shouldTrySupabase()) {
         try {
@@ -623,6 +758,7 @@ let supabaseTableErrorLogged = false;
             const parsedReports = data.map((r: any) => ({
               ...r,
               isIssuePresent: !!r.isIssuePresent,
+              reporter: r.reporter,
               aiAnalysis: {
                 issueType: r.issueType,
                 description: r.description,
@@ -651,6 +787,7 @@ let supabaseTableErrorLogged = false;
       const parsedReports = reports.map((r: any) => ({
         ...r,
         isIssuePresent: !!r.isIssuePresent,
+        reporter: r.reporter,
         aiAnalysis: {
           issueType: r.issueType,
           description: r.description,
@@ -727,6 +864,36 @@ let supabaseTableErrorLogged = false;
 
     const timestamp = new Date().toISOString();
 
+    // Try Cloud SQL first
+    if (process.env.SQL_HOST) {
+      try {
+        await dbService.createReport({
+          id: report.id,
+          mediaUrl: report.mediaUrl,
+          mediaType: report.mediaType,
+          latitude: report.latitude,
+          longitude: report.longitude,
+          userDescription: report.userDescription,
+          issueType: report.aiAnalysis.issueType,
+          description: report.aiAnalysis.description,
+          priority: report.aiAnalysis.priority,
+          solution: report.aiAnalysis.solution,
+          isIssuePresent: report.aiAnalysis.isIssuePresent ? 1 : 0,
+          status: report.status,
+          timestamp: timestamp,
+          area: area,
+          reporter: report.reporter || null
+        });
+
+        const fullReport = { ...report, area, timestamp, reporter: report.reporter };
+        broadcast({ type: 'NEW_REPORT', report: fullReport });
+        await createNotificationsForReport(fullReport);
+        return res.status(201).json({ message: 'Report created successfully (Cloud SQL)' });
+      } catch (err) {
+        console.error("Cloud SQL create report failed, falling back:", err);
+      }
+    }
+
     // Try Supabase first
     if (shouldTrySupabase()) {
       try {
@@ -746,11 +913,12 @@ let supabaseTableErrorLogged = false;
             isIssuePresent: report.aiAnalysis.isIssuePresent ? 1 : 0,
             status: report.status,
             timestamp: timestamp,
-            area: area
+            area: area,
+            reporter: report.reporter || null
           }]);
         
         if (!error) {
-          const fullReport = { ...report, area, timestamp };
+          const fullReport = { ...report, area, timestamp, reporter: report.reporter };
           broadcast({ type: 'NEW_REPORT', report: fullReport });
           await createNotificationsForReport(fullReport);
           return res.status(201).json({ message: 'Report created successfully (Supabase)' });
@@ -763,8 +931,8 @@ let supabaseTableErrorLogged = false;
     }
 
     const stmt = db.prepare(`
-      INSERT INTO reports (id, mediaUrl, mediaType, latitude, longitude, userDescription, issueType, description, priority, solution, isIssuePresent, status, timestamp, area)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO reports (id, mediaUrl, mediaType, latitude, longitude, userDescription, issueType, description, priority, solution, isIssuePresent, status, timestamp, area, reporter)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     try {
@@ -782,11 +950,12 @@ let supabaseTableErrorLogged = false;
         report.aiAnalysis.isIssuePresent ? 1 : 0,
         report.status,
         timestamp,
-        area
+        area,
+        report.reporter || null
       );
 
       // Broadcast new report via WebSocket
-      const fullReport = { ...report, area, timestamp };
+      const fullReport = { ...report, area, timestamp, reporter: report.reporter };
       broadcast({ type: 'NEW_REPORT', report: fullReport });
       await createNotificationsForReport(fullReport);
 
@@ -841,6 +1010,34 @@ let supabaseTableErrorLogged = false;
       });
 
       const reportTimestamp = report.timestamp || timestamp;
+
+      // Try Cloud SQL
+      if (process.env.SQL_HOST) {
+        try {
+          await dbService.createReport({
+            id: report.id,
+            mediaUrl: report.mediaUrl,
+            mediaType: report.mediaType,
+            latitude: report.latitude,
+            longitude: report.longitude,
+            userDescription: report.userDescription,
+            issueType: report.aiAnalysis.issueType,
+            description: report.aiAnalysis.description,
+            priority: report.aiAnalysis.priority,
+            solution: report.aiAnalysis.solution,
+            isIssuePresent: report.aiAnalysis.isIssuePresent ? 1 : 0,
+            status: report.status,
+            timestamp: reportTimestamp,
+            area: area,
+            reporter: report.reporter || null
+          });
+          results.success++;
+          await createNotificationsForReport({ ...report, area, timestamp: reportTimestamp });
+          continue;
+        } catch (err) {
+          console.error("Cloud SQL bulk insert report failed:", err);
+        }
+      }
 
       // Try Supabase
       if (shouldTrySupabase()) {
@@ -901,6 +1098,19 @@ let supabaseTableErrorLogged = false;
     const { id } = req.params;
     const { status } = req.body;
     
+    // Try Cloud SQL first
+    if (process.env.SQL_HOST) {
+      try {
+        const updated = await dbService.updateReportStatus(id, status);
+        if (updated) {
+          broadcast({ type: 'REPORT_UPDATED', id, status });
+          return res.json({ message: 'Status updated (Cloud SQL)' });
+        }
+      } catch (err) {
+        console.error("Cloud SQL update report status failed, falling back:", err);
+      }
+    }
+
     // Try Supabase first
     if (shouldTrySupabase()) {
       try {
@@ -976,6 +1186,29 @@ let supabaseTableErrorLogged = false;
       } catch (err) {
         return res.status(401).json({ message: 'Invalid token' });
       }
+
+      // Try Cloud SQL first
+      if (process.env.SQL_HOST) {
+        try {
+          const results = await dbService.getNotifications(decoded.id);
+          const reports = await dbService.getReports();
+          const reportMap = new Map((reports || []).map((r: any) => [r.id, r]));
+          const formatted = (results || []).map((n: any) => {
+            const report = reportMap.get(n.reportId);
+            return {
+              ...n,
+              isRead: n.isRead,
+              createdAt: n.createdAt,
+              area: report?.area,
+              issueType: report?.issueType,
+              priority: report?.priority
+            };
+          });
+          return res.json(formatted);
+        } catch (err) {
+          console.error("Cloud SQL fetch notifications failed:", err);
+        }
+      }
       
       // Try Supabase first
       if (shouldTrySupabase()) {
@@ -1026,6 +1259,15 @@ let supabaseTableErrorLogged = false;
     try {
       const { id } = req.params;
 
+      // Try Cloud SQL
+      if (process.env.SQL_HOST) {
+        try {
+          await dbService.markNotificationRead(Number(id));
+        } catch (err) {
+          console.error("Cloud SQL mark notification read failed:", err);
+        }
+      }
+
       // Try Supabase
       if (shouldTrySupabase()) {
         try {
@@ -1059,6 +1301,15 @@ let supabaseTableErrorLogged = false;
         return res.status(401).json({ message: 'Invalid token' });
       }
       
+      // Try Cloud SQL
+      if (process.env.SQL_HOST) {
+        try {
+          await dbService.markAllNotificationsRead(decoded.id);
+        } catch (err) {
+          console.error("Cloud SQL mark all notifications read failed:", err);
+        }
+      }
+
       // Try Supabase
       if (shouldTrySupabase()) {
         try {
@@ -1079,6 +1330,24 @@ let supabaseTableErrorLogged = false;
   // Get Stats for Dashboard
   app.get('/api/stats', async (req, res) => {
     try {
+      // Try Cloud SQL first
+      if (process.env.SQL_HOST) {
+        try {
+          const stats = await dbService.getDashboardStats();
+          if (stats) {
+            return res.json({
+              total: stats.totalReports,
+              byPriority: stats.byPriority,
+              byStatus: stats.byStatus,
+              byArea: stats.byArea,
+              recentActivity: stats.recentActivity
+            });
+          }
+        } catch (err) {
+          console.error("Cloud SQL dashboard stats query failed, falling back:", err);
+        }
+      }
+
       // Try Supabase first
       if (shouldTrySupabase()) {
         try {
@@ -1159,6 +1428,31 @@ let supabaseTableErrorLogged = false;
       
       const { productName, quantity, address, phone } = req.body;
 
+      if (process.env.SQL_HOST) {
+        try {
+          const order = await dbService.createOrder({
+            userId: decoded.id,
+            productName,
+            quantity: Number(quantity),
+            address,
+            phone
+          });
+          if (order) {
+            return res.status(201).json({
+              id: order.id,
+              userId: order.userId,
+              productName: order.productName,
+              quantity: order.quantity,
+              address: order.address,
+              phone: order.phone,
+              status: order.status
+            });
+          }
+        } catch (err) {
+          console.error("Cloud SQL create order failed:", err);
+        }
+      }
+
       if (shouldTrySupabase()) {
         try {
           const { data, error } = await supabase
@@ -1216,6 +1510,25 @@ let supabaseTableErrorLogged = false;
         return res.status(401).json({ message: 'Invalid token' });
       }
 
+      if (process.env.SQL_HOST) {
+        try {
+          const results = await dbService.getOrders(decoded.id);
+          const parsedOrders = (results || []).map((o: any) => ({
+            id: o.id,
+            userId: o.userId,
+            productName: o.productName,
+            quantity: o.quantity,
+            address: o.address,
+            phone: o.phone,
+            status: o.status,
+            created_at: o.createdAt
+          }));
+          return res.json(parsedOrders);
+        } catch (err) {
+          console.error("Cloud SQL fetch orders failed:", err);
+        }
+      }
+
       if (shouldTrySupabase()) {
         try {
           const { data, error } = await supabase
@@ -1244,6 +1557,8 @@ let supabaseTableErrorLogged = false;
       res.status(500).json({ message: 'Lỗi khi tải đơn hàng' });
     }
   });
+
+
 
   // 404 handler for API routes
   app.all('/api/*all', (req, res) => {

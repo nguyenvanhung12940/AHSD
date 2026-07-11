@@ -46,7 +46,9 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [healthStatus, setHealthStatus] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'looker'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'myReports' | 'looker'>(
+    user && (user.role === 'admin' || user.role === 'environment_department') ? 'overview' : 'myReports'
+  );
 
   const lookerUrl = import.meta.env.VITE_LOOKER_DASHBOARD_URL;
   const isAdmin = user && (user.role === 'admin' || user.role === 'environment_department');
@@ -66,6 +68,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     }
     return reports;
   }, [reports, user, isAdmin]);
+
+  const myReports = React.useMemo(() => {
+    if (!user) return [];
+    return reports.filter((r: any) => r.reporter === user.username);
+  }, [reports, user]);
 
   const stats = React.useMemo(() => {
     const daNangDistricts = ['Hải Châu', 'Thanh Khê', 'Sơn Trà', 'Ngũ Hành Sơn', 'Liên Chiểu', 'Cẩm Lệ', 'Hòa Vang', 'Hoàng Sa'];
@@ -177,23 +184,29 @@ const DashboardView: React.FC<DashboardViewProps> = ({
               <p className="text-3xl font-black text-brand-600 tabular-nums">1,250</p>
             </div>
             <div className="h-12 w-[1px] bg-slate-200 mx-2 hidden sm:block"></div>
-            <div className="flex bg-slate-100 p-1 rounded-2xl">
+            <div className="flex bg-slate-100 p-1 rounded-2xl flex-wrap gap-1 md:gap-0">
+              <button 
+                onClick={() => setActiveTab('myReports')}
+                className={`px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-black rounded-xl transition-all ${activeTab === 'myReports' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Báo cáo của tôi
+              </button>
               <button 
                 onClick={() => setActiveTab('overview')}
-                className={`px-5 py-2.5 text-xs font-black rounded-xl transition-all ${activeTab === 'overview' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-black rounded-xl transition-all ${activeTab === 'overview' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 Tổng quan
               </button>
               <button 
                 onClick={() => setActiveTab('orders')}
-                className={`px-5 py-2.5 text-xs font-black rounded-xl transition-all ${activeTab === 'orders' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-black rounded-xl transition-all ${activeTab === 'orders' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 Đơn hàng
               </button>
               {isAdmin && (
                 <button 
                   onClick={() => setActiveTab('looker')}
-                  className={`px-5 py-2.5 text-xs font-black rounded-xl transition-all ${activeTab === 'looker' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  className={`px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-black rounded-xl transition-all ${activeTab === 'looker' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Phân tích
                 </button>
@@ -574,6 +587,99 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
         </>
+      ) : activeTab === 'myReports' ? (
+        <div className="glass-card p-6 min-h-[500px]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+            <div>
+              <h3 className="font-black text-slate-900 flex items-center text-xs uppercase tracking-widest text-brand-600">
+                <span className="w-1.5 h-5 bg-brand-500 rounded-full mr-3 inline-block align-middle"></span>
+                Lịch sử Báo cáo Sự cố
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">Theo dõi trạng thái và lịch sử gửi tin báo sự cố môi trường của bạn</p>
+            </div>
+            
+            <div className="flex gap-4">
+              <div className="px-4 py-2 bg-slate-100/50 rounded-2xl border border-slate-200">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Đã gửi</p>
+                <p className="text-lg font-black text-slate-900 tabular-nums">{myReports.length}</p>
+              </div>
+              <div className="px-4 py-2 bg-amber-50/50 rounded-2xl border border-amber-100">
+                <p className="text-[9px] font-black text-amber-500 uppercase tracking-wider">Đang xử lý</p>
+                <p className="text-lg font-black text-amber-600 tabular-nums">{myReports.filter(r => r.status === 'Đang xử lý').length}</p>
+              </div>
+              <div className="px-4 py-2 bg-emerald-50/50 rounded-2xl border border-emerald-100">
+                <p className="text-[9px] font-black text-emerald-500 uppercase tracking-wider">Xong</p>
+                <p className="text-lg font-black text-emerald-600 tabular-nums">{myReports.filter(r => r.status === 'Đã xử lý').length}</p>
+              </div>
+            </div>
+          </div>
+
+          {myReports.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {myReports.map((report) => (
+                <div 
+                  key={report.id} 
+                  onClick={() => onSelectReport?.(report.id)}
+                  className="p-5 bg-white border border-slate-100 rounded-3xl transition-all hover:shadow-xl hover:shadow-slate-100/30 cursor-pointer flex gap-4 group"
+                >
+                  <div className="relative flex-shrink-0 w-20 h-20 rounded-2xl overflow-hidden border border-slate-100 shadow-sm bg-slate-50">
+                    <img 
+                      src={report.mediaUrl} 
+                      alt="Sự cố" 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      onError={(e) => {(e.target as HTMLImageElement).src = 'https://via.placeholder.com/150?text=S%E1%BB%B1+c%E1%BB%91'}}
+                    />
+                    <div className={`absolute top-1 left-1 w-5 h-5 rounded-lg flex items-center justify-center text-[10px] text-white font-black shadow-md ${
+                      report.status === 'Báo cáo mới' ? 'bg-red-500' : 
+                      report.status === 'Đang xử lý' ? 'bg-amber-500' : 'bg-emerald-500'
+                    }`}>
+                      {report.status === 'Báo cáo mới' ? '!' : report.status === 'Đang xử lý' ? '...' : '✓'}
+                    </div>
+                  </div>
+
+                  <div className="flex-grow min-w-0 flex flex-col justify-between">
+                    <div>
+                      <div className="flex justify-between items-start gap-2 mb-1">
+                        <h4 className="font-black text-slate-900 text-xs truncate uppercase tracking-tight">
+                          {report.aiAnalysis?.issueType || 'Sự cố môi trường'}
+                        </h4>
+                        <span className={`text-[9px] px-2 py-0.5 rounded-md font-black uppercase tracking-wider shrink-0 ${
+                          report.status === 'Đã xử lý' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                          report.status === 'Đang xử lý' ? 'bg-amber-50 text-amber-600 border border-amber-100' :
+                          'bg-red-50 text-red-600 border border-red-100'
+                        }`}>
+                          {report.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                        {report.userDescription || report.description}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-1">
+                      <span className="text-[9px] font-bold text-slate-400">
+                        {new Date(report.timestamp).toLocaleDateString('vi-VN')}
+                      </span>
+                      <span className="text-[9px] px-2 py-0.5 bg-slate-50 text-slate-500 rounded-md font-bold uppercase tracking-wider">
+                        {report.area}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400">
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+              </div>
+              <h4 className="text-base font-bold text-slate-900 mb-1">Chưa có báo cáo nào</h4>
+              <p className="text-xs text-slate-400 max-w-xs">Bạn chưa gửi báo cáo sự cố nào dưới tài khoản này.</p>
+            </div>
+          )}
+        </div>
       ) : activeTab === 'orders' ? (
         <div className="glass-card p-6 min-h-[500px]">
           <h3 className="font-black text-slate-900 mb-8 flex items-center text-xs uppercase tracking-widest">

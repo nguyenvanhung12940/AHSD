@@ -334,6 +334,8 @@ const App: React.FC = () => {
     }
   };
 
+  // Fetch notes from API (removed)
+
   useEffect(() => {
     fetchReports();
     
@@ -701,6 +703,7 @@ const App: React.FC = () => {
         aiAnalysis, // Sử dụng trực tiếp kết quả phân tích
         status: 'Báo cáo mới',
         timestamp: new Date(),
+        reporter: user?.username || undefined,
       };
 
       if (!isOnline) {
@@ -870,6 +873,8 @@ const App: React.FC = () => {
     setSelectedEducationTopic(null);
   };
 
+
+
   const handleMapViewChange = useCallback((center: L.LatLng, zoom: number) => {
     setMapViewState({ center: [center.lat, center.lng], zoom });
   }, []);
@@ -1017,16 +1022,16 @@ const App: React.FC = () => {
                   onStartNewReport={() => handleStartNewReport('home')}
                   onSelectReportAndNavigateToMap={handleSelectReportAndNavigateToMap}
                   onSelectEducationTopic={handleSelectEducationTopic}
-                   onNavigateToEnvironmentalMap={() => setView('environmentalMap')}
-                   onNavigateToSOS={() => setView('sos')}
-                   onOpenOrderForm={() => {
+                  onNavigateToEnvironmentalMap={() => setView('environmentalMap')}
+                  onNavigateToSOS={() => setView('sos')}
+                  onOpenOrderForm={() => {
                      if (!user) {
                        addToast('Vui lòng đăng nhập để đổi quà!', 'warning');
                        setView('login');
                      } else {
                        setIsOrderFormOpen(true);
                      }
-                   }}
+                  }}
                 />;
     }
   }

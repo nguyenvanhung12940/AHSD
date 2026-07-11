@@ -149,7 +149,7 @@ const HomeView: React.FC<HomeViewProps> = ({
                  <span className="w-1.5 h-6 bg-brand-600 rounded-full mr-3"></span>
                  Truy cập nhanh
                </h3>
-               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+               <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
                  <button onClick={onStartNewReport} className="bento-button group flex flex-col items-center justify-center p-6 bg-brand-600 rounded-[2rem] shadow-xl shadow-brand-100">
                    <div className="p-3 bg-white/20 rounded-2xl mb-3 text-white group-hover:scale-110 transition-transform">
                      <DocumentPlusIcon className="w-8 h-8" />
@@ -183,7 +183,7 @@ const HomeView: React.FC<HomeViewProps> = ({
                        <ShoppingCartIcon className="w-8 h-8" />
                     </div>
                     <span className="font-bold text-emerald-700 text-sm">Đổi quà Xanh</span>
-                  </button>
+                 </button>
                </div>
             </section>
 
